@@ -1,4 +1,3 @@
-```js
 const mineflayer = require('mineflayer');
 const { Vec3 } = require('vec3');
 const config = require('./config.json');
