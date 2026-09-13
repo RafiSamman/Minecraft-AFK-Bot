@@ -1,26 +1,23 @@
 const mineflayer = require('mineflayer');
-const { Vec3 } = require('vec3');
 const config = require('./config.json');
 
-const bot = mineflayer.createBot({
-  host: config.serverHost,
-  port: config.serverPort,
-  username: config.botUsername,
-  auth: 'offline',
-  version: false,
-  viewDistance: config.botChunk
-});
+let bot = null;
 
 let movementPhase = 0;
+let movementTimer = null;
+let hungerTimer = null;
+let reconnectTimer = null;
 
 const STEP_INTERVAL = 1500;
 const JUMP_DURATION = 500;
 
-// Hunger settings
+// Eat when hunger reaches this level or lower
 const MIN_FOOD_LEVEL = 14;
-let isEating = false;
 
-// Foods the bot will automatically eat
+// Seconds between reconnect attempts
+const RECONNECT_DELAY = 10000;
+
+// Foods the bot can eat
 const FOOD_ITEMS = [
   'cooked_beef',
   'cooked_porkchop',
@@ -35,21 +32,103 @@ const FOOD_ITEMS = [
   'golden_carrot'
 ];
 
-bot.on('spawn', () => {
-  setTimeout(() => {
-    bot.setControlState('sneak', true);
+let isEating = false;
+let isConnecting = false;
+
+function createBot() {
+  if (isConnecting) return;
+
+  isConnecting = true;
+
+  console.log(`🔄 Connecting ${config.botUsername}...`);
+
+  bot = mineflayer.createBot({
+    host: config.serverHost,
+    port: config.serverPort,
+    username: config.botUsername,
+    auth: 'offline',
+    version: false,
+    viewDistance: config.botChunk
+  });
+
+  bot.once('spawn', () => {
+    isConnecting = false;
+
     console.log(`✅ ${config.botUsername} is Ready!`);
-  }, 3000);
 
-  setTimeout(movementCycle, STEP_INTERVAL);
+    isEating = false;
+    movementPhase = 0;
 
-  // Check hunger regularly
-  setInterval(checkHunger, 5000);
-});
+    // Clear old timers
+    if (movementTimer) clearTimeout(movementTimer);
+    if (hungerTimer) clearInterval(hungerTimer);
+
+    // Sneak after joining
+    setTimeout(() => {
+      if (!bot || !bot.entity) return;
+
+      bot.setControlState('sneak', true);
+      console.log(`🥷 ${config.botUsername} is now AFK.`);
+    }, 3000);
+
+    // Start movement
+    movementTimer = setTimeout(movementCycle, STEP_INTERVAL);
+
+    // Check hunger every 5 seconds
+    hungerTimer = setInterval(checkHunger, 5000);
+  });
+
+  bot.on('error', (err) => {
+    console.error(`⚠️ Bot error: ${err.message}`);
+  });
+
+  bot.on('end', () => {
+    console.log(`⛔️ ${config.botUsername} disconnected.`);
+
+    isConnecting = false;
+    isEating = false;
+
+    // Stop timers
+    if (movementTimer) {
+      clearTimeout(movementTimer);
+      movementTimer = null;
+    }
+
+    if (hungerTimer) {
+      clearInterval(hungerTimer);
+      hungerTimer = null;
+    }
+
+    // Reset bot reference
+    bot = null;
+
+    // Automatically reconnect
+    scheduleReconnect();
+  });
+
+  bot.on('kicked', (reason) => {
+    console.log(`🚪 ${config.botUsername} was kicked:`, reason);
+  });
+}
+
+function scheduleReconnect() {
+  if (reconnectTimer) return;
+
+  console.log(`🔄 Reconnecting in ${RECONNECT_DELAY / 1000} seconds...`);
+
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+
+    console.log(`🔌 Attempting to reconnect...`);
+    createBot();
+  }, RECONNECT_DELAY);
+}
 
 function movementCycle() {
-  if (!bot.entity || isEating) {
-    setTimeout(movementCycle, STEP_INTERVAL);
+  if (!bot || !bot.entity || isEating) {
+    if (bot && bot.entity) {
+      movementTimer = setTimeout(movementCycle, STEP_INTERVAL);
+    }
     return;
   }
 
@@ -72,8 +151,11 @@ function movementCycle() {
       bot.setControlState('jump', true);
 
       setTimeout(() => {
-        bot.setControlState('jump', false);
+        if (bot && bot.entity) {
+          bot.setControlState('jump', false);
+        }
       }, JUMP_DURATION);
+
       break;
 
     case 3:
@@ -85,13 +167,12 @@ function movementCycle() {
 
   movementPhase = (movementPhase + 1) % 4;
 
-  setTimeout(movementCycle, STEP_INTERVAL);
+  movementTimer = setTimeout(movementCycle, STEP_INTERVAL);
 }
 
 async function checkHunger() {
-  if (!bot.entity || isEating) return;
+  if (!bot || !bot.entity || isEating) return;
 
-  // Mineflayer food level is normally 0-20
   if (bot.food === undefined || bot.food > MIN_FOOD_LEVEL) {
     return;
   }
@@ -99,7 +180,9 @@ async function checkHunger() {
   const food = findFood();
 
   if (!food) {
-    console.log(`⚠️ Hunger is ${bot.food}/20, but no food was found in inventory.`);
+    console.log(
+      `⚠️ Hunger is ${bot.food}/20, but no food was found in inventory.`
+    );
     return;
   }
 
@@ -107,15 +190,21 @@ async function checkHunger() {
 }
 
 function findFood() {
+  if (!bot) return null;
+
   return bot.inventory.items().find(item =>
     FOOD_ITEMS.includes(item.name)
   );
 }
 
 async function eatFood(food) {
+  if (!bot || !bot.entity || isEating) return;
+
   isEating = true;
 
-  console.log(`🍖 Hunger: ${bot.food}/20. Eating ${food.name}...`);
+  console.log(
+    `🍖 Hunger: ${bot.food}/20. Eating ${food.name}...`
+  );
 
   // Stop movement while eating
   bot.setControlState('forward', false);
@@ -126,18 +215,15 @@ async function eatFood(food) {
     await bot.equip(food, 'hand');
     await bot.consume();
 
-    console.log(`✅ Ate ${food.name}. Hunger is now ${bot.food}/20.`);
+    console.log(
+      `✅ Ate ${food.name}. Hunger is now ${bot.food}/20.`
+    );
   } catch (err) {
-    console.error('⚠️ Could not eat food:', err.message);
+    console.error(`⚠️ Could not eat food: ${err.message}`);
   }
 
   isEating = false;
 }
 
-bot.on('error', (err) => {
-  console.error('⚠️ Error:', err);
-});
-
-bot.on('end', () => {
-  console.log('⛔️ Bot Disconnected!');
-});
+// Start the bot
+createBot();
