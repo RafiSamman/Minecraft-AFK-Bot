@@ -47,7 +47,10 @@ function createBot() {
     port: config.serverPort,
     username: config.botUsername,
     auth: 'offline',
-    version: false,
+
+    // Minecraft Java 26.2
+    version: '26.2',
+
     viewDistance: config.botChunk
   });
 
@@ -59,22 +62,24 @@ function createBot() {
     isEating = false;
     movementPhase = 0;
 
-    // Clear old timers
-    if (movementTimer) clearTimeout(movementTimer);
-    if (hungerTimer) clearInterval(hungerTimer);
+    if (movementTimer) {
+      clearTimeout(movementTimer);
+    }
 
-    // Sneak after joining
+    if (hungerTimer) {
+      clearInterval(hungerTimer);
+    }
+
     setTimeout(() => {
       if (!bot || !bot.entity) return;
 
       bot.setControlState('sneak', true);
+
       console.log(`🥷 ${config.botUsername} is now AFK.`);
     }, 3000);
 
-    // Start movement
     movementTimer = setTimeout(movementCycle, STEP_INTERVAL);
 
-    // Check hunger every 5 seconds
     hungerTimer = setInterval(checkHunger, 5000);
   });
 
@@ -88,7 +93,6 @@ function createBot() {
     isConnecting = false;
     isEating = false;
 
-    // Stop timers
     if (movementTimer) {
       clearTimeout(movementTimer);
       movementTimer = null;
@@ -99,10 +103,8 @@ function createBot() {
       hungerTimer = null;
     }
 
-    // Reset bot reference
     bot = null;
 
-    // Automatically reconnect
     scheduleReconnect();
   });
 
@@ -114,12 +116,15 @@ function createBot() {
 function scheduleReconnect() {
   if (reconnectTimer) return;
 
-  console.log(`🔄 Reconnecting in ${RECONNECT_DELAY / 1000} seconds...`);
+  console.log(
+    `🔄 Reconnecting in ${RECONNECT_DELAY / 1000} seconds...`
+  );
 
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
 
     console.log(`🔌 Attempting to reconnect...`);
+
     createBot();
   }, RECONNECT_DELAY);
 }
@@ -127,8 +132,12 @@ function scheduleReconnect() {
 function movementCycle() {
   if (!bot || !bot.entity || isEating) {
     if (bot && bot.entity) {
-      movementTimer = setTimeout(movementCycle, STEP_INTERVAL);
+      movementTimer = setTimeout(
+        movementCycle,
+        STEP_INTERVAL
+      );
     }
+
     return;
   }
 
@@ -167,13 +176,19 @@ function movementCycle() {
 
   movementPhase = (movementPhase + 1) % 4;
 
-  movementTimer = setTimeout(movementCycle, STEP_INTERVAL);
+  movementTimer = setTimeout(
+    movementCycle,
+    STEP_INTERVAL
+  );
 }
 
 async function checkHunger() {
   if (!bot || !bot.entity || isEating) return;
 
-  if (bot.food === undefined || bot.food > MIN_FOOD_LEVEL) {
+  if (
+    bot.food === undefined ||
+    bot.food > MIN_FOOD_LEVEL
+  ) {
     return;
   }
 
@@ -183,6 +198,7 @@ async function checkHunger() {
     console.log(
       `⚠️ Hunger is ${bot.food}/20, but no food was found in inventory.`
     );
+
     return;
   }
 
@@ -206,24 +222,25 @@ async function eatFood(food) {
     `🍖 Hunger: ${bot.food}/20. Eating ${food.name}...`
   );
 
-  // Stop movement while eating
   bot.setControlState('forward', false);
   bot.setControlState('back', false);
   bot.setControlState('jump', false);
 
   try {
     await bot.equip(food, 'hand');
+
     await bot.consume();
 
     console.log(
       `✅ Ate ${food.name}. Hunger is now ${bot.food}/20.`
     );
   } catch (err) {
-    console.error(`⚠️ Could not eat food: ${err.message}`);
+    console.error(
+      `⚠️ Could not eat food: ${err.message}`
+    );
   }
 
   isEating = false;
 }
 
-// Start the bot
 createBot();
