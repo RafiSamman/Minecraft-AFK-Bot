@@ -2,5 +2,5 @@
   "serverHost": "cherry.p3rf.space",
   "serverPort": 25565,
   "botUsername": "perfbot",
-  "botChunk": 1
+  "botChunk": 3
 }
